@@ -1,13 +1,13 @@
 library(tidyverse)
-library(ggplot2)
 library(lubridate)
 library(magrittr)
 library(stringr)
 library(ggthemes)
+library(ggplot2)
 
 
 # Read in data
-data <- read_csv('data/repdata%2Fdata%2FStormData.csv')
+data <- read_csv('data/repdata%2Fdata%2FStormData.csv.bz2')
 
 # Explore
 dim(data) # 902297 rows, 37 variables
@@ -25,16 +25,38 @@ data %<>%
 
 data$EVTYPE <- tolower(data$EVTYPE)
 
+data$EVTYPE %<>% # Replace some common event type inconsistencies
+        str_replace_all('^winter storm.*', 'winter storm') %<>%
+        str_replace_all('^thunderstorm.*', 'thunderstorm') %<>%
+        str_replace_all('^tstm.*', 'thunderstorm') %<>%
+        str_replace_all('^tropical storm.*', 'tropical storm') %<>%
+        str_replace_all('^hurricane.*', 'hurricane')
+
 # Create specific data to answer each question
 # Question 1: human impact
 
 # Create dataframe of total impact (injuries + fatalities)
 human <- data %>%
                 group_by(EVTYPE) %>% # Group to event type
-                summarise(human_impact = sum(INJURIES) + sum(FATALITIES)) %>% # Create summary total
+                summarise(human_impact = sum(INJURIES) + sum(FATALITIES),
+                          `Killed/Injured\nper event` = human_impact / n()) %>% # Create summary total
                 arrange(desc(human_impact)) # Arrange by most impactful
 
 human <- head(human, 10) # Select only the top 10
+
+# Plot 
+human$EVTYPE <- factor(human$EVTYPE, levels = human$EVTYPE[order(human$human_impact)])
+ggplot(human, aes(x = EVTYPE, y = human_impact)) +
+        theme_tufte() +
+        geom_segment(aes(x = EVTYPE, xend = EVTYPE,
+                         y = 0, yend = max(human_impact)),
+                     linetype = 3, colour = 'slategrey') +
+        geom_point(aes(size = `Killed/Injured\nper event`), colour = 'steelblue') +
+        coord_flip() +
+        theme(axis.line.x = element_line(size = 0.2)) +
+        labs(title = '',
+             x = 'Type of Weather Event',
+             y = 'Number of Killed or Injured') 
         
 
 # Question 2: Economic impact
@@ -54,18 +76,13 @@ economic$PROPDMGEXP <- as.integer(economic$PROPDMGEXP) # Force to integer value
 economic$CROPDMGEXP %<>% str_replace_all(repl) # Replace exponent in crop damage
 economic$CROPDMGEXP <- as.integer(economic$CROPDMGEXP) # Force to integer value
 
-economic$EVTYPE %<>% # Replace some common event type inconsistencies
-        str_replace_all('^winter storm.', 'winter storm') %<>%
-        str_replace_all('^thunderstorm.', 'thunderstorm') %<>%
-        str_replace_all('^tropical storm.', 'tropical storm') %<>%
-        str_replace_all('^hurricane.', 'hurricane')
-
 economic %<>% # Create summary dataframe
         mutate(property = as.numeric(PROPDMG * (10^PROPDMGEXP)), # Total property damage
                crops = as.numeric(CROPDMG * (10^CROPDMGEXP)), # Total crops damage
                damage = property + crops) %<>% # Total damage overall
         group_by(EVTYPE) %<>% 
-        summarise(damage = sum(damage) / 1e9) %<>% # Create summary of damage / event type
+        summarise(damage = sum(damage) / 1e9,
+                  per_event = damage / n()) %<>% # Create summary of damage / event type
         arrange(desc(damage))
 
 economic <- head(economic, 10) # Take top 10 events by damage caused
@@ -78,7 +95,7 @@ ggplot(economic, aes(x = EVTYPE, y = damage)) +
         geom_segment(aes(x = EVTYPE, xend = EVTYPE,
                          y = 0, yend = max(damage)),
                      linetype = 3, colour = 'slategrey') +
-        geom_point(size = 2.5, colour = 'steelblue') +
+        geom_point(aes(size = per_event), colour = 'steelblue') +
         theme(axis.line.x = element_line(size = 0.2)) +
         coord_flip() +
         labs(title = 'For Recorded Data in the United States 1996 - 2016 Flooding has Caused\nSignificantly More Damage by Cost than any Other Weather Type',
